@@ -1,6 +1,7 @@
-// STUB (T01): returns fixtures until the owner replaces it.
-// Owner: A (T02). Contract: docs/CONTRACTS.md.
-import { routesFixture } from "@/contracts/fixtures";
+// GET /api/routes  (owner: A, T02)
 import { handle, json } from "@/server/http";
+import { getRoutes } from "@/server/mbta/routes";
 
-export const GET = handle(async () => json(routesFixture));
+export const GET = handle(async () =>
+  json(getRoutes(), { headers: { "cache-control": "public, s-maxage=86400" } }),
+);
