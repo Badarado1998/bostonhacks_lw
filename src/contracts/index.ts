@@ -501,3 +501,6 @@ export interface AwardPointsResult {
   tokensAwarded: number;
 }
 export type AwardPoints = (input: AwardPointsInput) => Promise<AwardPointsResult>;
+
+// Shared bounty board and station games (#118).
+export * from "./games";

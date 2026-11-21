@@ -154,3 +154,21 @@ Errors always use `{ "error": { "code", "message" } }`. `message` is safe to sho
 | `POST /api/challenges/submit` | Pass at score >= 0.6 awards `round(points x score)` (min 1), once per challenge per round; failed grades can be retried. Demo grader when there is no key (or Gemini errors) while the sim runs. 8/min per rider and per IP. | 400 `bad_rider`, `bad_image`; 413 `image_too_large`; 404 `rider_not_found`, `challenge_not_found`; 409 `no_delay`; 429 `rate_limited` |
 
 Any endpoint: 500 `internal` on unexpected errors.
+
+## 4g. Shared bounty board and station trivia (B, #118; types in `src/contracts/games.ts`)
+```
+GET /api/bounties -> BountiesResponse { posts: BountyPost[] } (most recent 100, excludes cancelled)
+POST /api/bounties { riderId, requestId, kind, title, body, rewardTokens, have?, want?, station? }
+  -> BountyMutationResponse { post, tokensLeft }
+POST /api/bounties/:id { riderId, action: "claim"|"release"|"complete"|"cancel" }
+  -> BountyMutationResponse { post, tokensLeft }
+GET /api/hunts/map -> HuntMapResponse (known stations, live delay eligibility and supported games)
+POST /api/hunts/trivia/start { riderId, stopId } -> TriviaRound
+POST /api/hunts/trivia/submit { riderId, roundId, answers: (string|null)[] } -> SubmitTriviaResponse
+```
+- **Board identity:** author name/team always comes from the rider record. No money or real partner guarantees. A bounty/trade posts locks `rewardTokens` from the author; an offer locks the buyer's tokens on claim. Amounts are integers 0-1000. Title 1-80, body 1-500, optional fields at most 80 characters; trade requires have/want. Create retries use the same `requestId` and never double-charge.
+- **Board lifecycle:** open -> reserved (a different rider claims) -> completed (author confirms delivery) or open (claimant releases). Author can cancel open/reserved posts. Escrow is refunded on release (offer buyer) or cancellation (whoever funded it); completion pays claimant for bounty/trade, author for offer. All token writes and state transitions share GAME_LOCK. Repeating the same successful transition is harmless; completing is final. Trades arrange delivery between riders; the app transfers only the advertised CitiToken sweetener, not external items or perk ownership.
+- **Board errors:** 400 invalid_post/invalid_action; 404 rider_not_found/post_not_found; 403 not_author/not_claimant/self_claim; 409 insufficient_tokens/post_unavailable. Existing error envelope applies.
+- **Trivia:** three server-selected questions, ten-minute round expiry. Submitted choice strings are graded against the server catalog; clients never submit scores or reward amounts. Up to 15 points (5 per correct answer), cumulative tokens at 1 per 10 points. A rider can earn once per station per UTC day; only that station's line having a current delay enables rewards. Clear stations remain practice rounds (zero reward). Repeated submission of a round returns its stored score with zero new awards. Only successfully rewarded attempts consume the station/day allowance. Silver trivia credits the rider's home team. A cleared delay before submission means practice credit only.
+- **Trivia errors:** 400 invalid_round/invalid_answers; 404 rider_not_found/round_not_found/station_not_found; 409 round_expired. All routes use request limits. Hunt map lists actual supported station clues, trivia, real landmark claims and active photo challenges; physical clues still require human verification.
+- Database migration is requested from A in #119. Without DATABASE_URL, the shared in-process fallback has the same semantics as the existing game services and resets on server restart.
