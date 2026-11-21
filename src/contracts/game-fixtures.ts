@@ -6,3 +6,6 @@ export const triviaRoundFixture: TriviaRound = { roundId: "demo-trivia", stopId:
   { id: "silver", prompt: "What grows when you earn points?", options: ["Your team's city district", "Your train fare", "The platform", "Your trip time"] },
 ] };
 export const triviaSubmitFixture: SubmitTriviaResponse = { correct: 3, total: 3, pointsAwarded: 15, tokensAwarded: 1, alreadyDone: false, correctAnswers: ["Blue", "Downtown Crossing", "Your team's city district"] };
+
+export const demoStatusFixture = { running: true };
+export const huntMapFixture = [{ stopId: "place-kencl", name: "Kenmore", teamRouteId: "Green", delayed: true, games: [{ id: "place-kencl:trivia", kind: "trivia" as const, title: "T trivia blitz", rewardPoints: 15, rewardTokens: 0 }] }];

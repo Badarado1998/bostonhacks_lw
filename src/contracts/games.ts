@@ -65,3 +65,6 @@ export interface StationGameInfo {
 }
 export interface StationGamesInfo { stopId: string; name: string; teamRouteId: string; delayed: boolean; games: StationGameInfo[] }
 export type HuntMapResponse = StationGamesInfo[];
+
+/** Read-only simulator state, used to label simulated location controls. */
+export interface DemoStatusResponse { running: boolean }
