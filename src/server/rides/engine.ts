@@ -32,6 +32,8 @@ export const CFG = {
   manualGraceMs: 30 * 60_000,
   /** a jump of more than this many stations between samples credits only the arrival station */
   maxStationJump: 3,
+  /** #96: a ride started with the Start button that never binds to a train ends after this */
+  startBindTimeoutMs: 20 * 60_000,
 };
 
 // ---------- types ----------
@@ -71,6 +73,12 @@ export interface EngineState {
   /** #96: crew bonus bookkeeping (epoch ms the crew formed; bonus points earned) */
   crewFormedAt: number | null;
   crewBonusPoints: number;
+  /** #96: fractional crew bonus not yet paid out (paid in whole points) */
+  crewBonusCarry: number;
+  /** #96: epoch ms the ride bound to a train (ride points are 1 per full minute from here) */
+  boundAt: number | null;
+  /** #96: whole minutes already credited (refs <sessionId>:min:1..n) */
+  minutesCredited: number;
 }
 
 export type SessionStatus = RideState | "ended";
@@ -134,6 +142,9 @@ export function emptyState(): EngineState {
     destStationId: null,
     crewFormedAt: null,
     crewBonusPoints: 0,
+    crewBonusCarry: 0,
+    boundAt: null,
+    minutesCredited: 0,
   };
 }
 
@@ -209,12 +220,14 @@ function bind(session: SessionData, v: LiveVehicle, ctx: StepContext, manual: bo
       candidateVehicleId: null,
       candidateCount: 0,
       window: [],
+      boundAt: session.state.boundAt ?? ctx.now,
       lastGoodMatchT: ctx.now,
       lastVehicleSeenT: ctx.now,
       awayCount: 0,
       lastAwayPos: null,
       lastReachedIdx: reachedIndex(v, order),
       lastStationId: v.currentStatus === "STOPPED_AT" ? v.stopId : null,
+      destStationId: (v.currentStatus === "STOPPED_AT" ? v.stopId : null) ?? session.state.destStationId,
     },
   };
 }
@@ -246,6 +259,9 @@ function creditProgress(session: SessionData, v: LiveVehicle, ctx: StepContext):
     if (st.lastStationId !== null) credit(v.stopId);
   }
   if (v.currentStatus === "STOPPED_AT" && v.stopId) st.lastStationId = v.stopId;
+  // Where the rider gets off: the last station the bound train reached (or was credited).
+  if (credits.length) st.destStationId = credits[credits.length - 1].stationId;
+  else if (v.currentStatus === "STOPPED_AT" && v.stopId) st.destStationId = v.stopId;
 
   return {
     session: { ...session, state: st, stopsCredited: session.stopsCredited + credits.length },
@@ -273,12 +289,12 @@ export function step(
     if (!v) {
       const missingFor = now - (session.state.lastVehicleSeenT ?? now);
       if (missingFor > CFG.vehicleMissingMs) {
-        return { session: end(session, "left", now), credits: [], message: rideOverMessage(session, "Your train left service.") };
+        return { session: end(session, "left", now), credits: [], message: rideOverMessage("Your train left service.") };
       }
       return { session: { ...session, status: "in_tunnel" }, credits: [], message: "Lost track of the train for a moment. Hang tight." };
     }
     if (v.directionId !== session.directionId) {
-      return { session: end(session, "left", now), credits: [], message: rideOverMessage(session, "The train reached the end of the line.") };
+      return { session: end(session, "left", now), credits: [], message: rideOverMessage("The train reached the end of the line.") };
     }
     session = { ...session, state: { ...session.state, lastVehicleSeenT: now } };
 
@@ -290,13 +306,13 @@ export function step(
     // Trust the train's progress instead of the (placeholder) sample position.
     if (session.manual && manual) {
       if (now - Date.parse(session.startedAt) > CFG.manualGraceMs) {
-        return { session: end(session, "left", now), credits: [], message: rideOverMessage(session, "Manual check-in timed out.") };
+        return { session: end(session, "left", now), credits: [], message: rideOverMessage("Manual check-in timed out.") };
       }
       const progressed = creditProgress({ ...session, status: "on_vehicle" }, v, ctx);
       return {
         session: progressed.session,
         credits: progressed.credits,
-        message: `On ${routeLabel(v.routeId)} (manual check-in). ${plural(progressed.session.stopsCredited, "stop")} credited.`,
+        message: `On ${routeLabel(v.routeId)} (manual check-in).`,
         nextStopId: nextStopFor(v, order),
       };
     }
@@ -310,7 +326,7 @@ export function step(
       const awayCount = moved ? session.state.awayCount + 1 : session.state.awayCount;
       session = { ...session, state: { ...session.state, awayCount, lastAwayPos: { lat: sample.lat, lng: sample.lng } } };
       if (awayCount >= CFG.leftSamples) {
-        return { session: end(session, "left", now), credits: [], message: rideOverMessage(session, "Looks like you got off.") };
+        return { session: end(session, "left", now), credits: [], message: rideOverMessage("Looks like you got off.") };
       }
       session = { ...session, status: "in_tunnel" };
     } else {
@@ -319,19 +335,26 @@ export function step(
     }
 
     if (session.status === "in_tunnel" && now - (session.state.lastGoodMatchT ?? now) > CFG.tunnelGraceMs) {
-      return { session: end(session, "left", now), credits: [], message: rideOverMessage(session, "We lost you underground for too long.") };
+      return { session: end(session, "left", now), credits: [], message: rideOverMessage("We lost you underground for too long.") };
     }
 
     const progressed = creditProgress(session, v, ctx);
     const nextStopId = nextStopFor(v, order);
     const msg =
       progressed.session.status === "in_tunnel"
-        ? `Underground. Still tracking your train. ${plural(progressed.session.stopsCredited, "stop")} credited.`
-        : `On ${routeLabel(v.routeId)}. ${plural(progressed.session.stopsCredited, "stop")} credited.`;
+        ? "Underground. Still tracking your train."
+        : `On ${routeLabel(v.routeId)}.`;
     return { session: progressed.session, credits: progressed.credits, message: msg, nextStopId };
   }
 
   // ----- searching -----
+  if (now - Date.parse(session.startedAt) > CFG.startBindTimeoutMs) {
+    return {
+      session: end(session, "left", now),
+      credits: [],
+      message: `We couldn't find your train within ${Math.round(CFG.startBindTimeoutMs / 60_000)} minutes, so this ride ended. Press Start again when you board.`,
+    };
+  }
   if (manual) {
     const stop = ctx.stationCoords(manual.stopId);
     if (!stop) {
@@ -411,13 +434,15 @@ export function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
+/** Rider-facing line name. Never splits a line by branch ("Green Line", not "Green Line B"). */
 export function routeLabel(routeId: string): string {
-  if (routeId.startsWith("Green-")) return `Green Line ${routeId.slice(6)}`;
+  if (routeId === "Green" || routeId.startsWith("Green-")) return "Green Line";
   if (["Red", "Orange", "Blue"].includes(routeId)) return `${routeId} Line`;
-  const sl: Record<string, string> = { "741": "SL1", "742": "SL2", "743": "SL3", "746": "SLW", "749": "SL5", "751": "SL4" };
-  return sl[routeId] ? `Silver Line ${sl[routeId]}` : routeId;
+  if (routeId === "Silver" || /^7\d\d$/.test(routeId)) return "Silver Line";
+  return routeId;
 }
 
-function rideOverMessage(session: SessionData, why: string): string {
-  return `${why} Ride over: ${plural(session.stopsCredited, "stop")} credited.`;
+/** The service appends the ride summary ("7 min, 7 pts."); the engine doesn't know points. */
+function rideOverMessage(why: string): string {
+  return `${why} Ride over.`;
 }
