@@ -2,6 +2,8 @@
 
 You are the lead engineer on a 2-person hackathon team building in Cursor. We have until **9:00 AM Sunday Nov 22 (ET)** to submit. Judging is a 3-minute pitch plus 1 minute of Q&A. **A working live demo beats breadth. Ship the core loop first, then add layers.** Work in small steps, commit after every working milestone, and tell us what to test after each one.
 
+NOTE: If anything here conflicts with AGENTS.md or docs/TASKS.md, those win. Ignore "you are the lead engineer", "build in Cursor", and section 11 "First actions" (Agent A does T01 per TASKS.md). Section 9 non-code tasks belong to the humans.
+
 ## 1. What we're building
 
 A mobile-first web game for people riding the MBTA. Riders earn points on trips they already take. Each line's riders collectively grow a district of a shared Boston skyline. When a delay hits, the app turns the wait into a quick find-it-in-the-station scavenger hunt. Riders also earn **CitiTokens** that can be redeemed for rotating perks.
