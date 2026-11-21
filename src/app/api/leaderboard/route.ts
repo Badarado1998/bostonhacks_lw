@@ -1,6 +1,4 @@
-// STUB (T01): returns fixtures until the owner replaces it.
-// Owner: B (T05). Contract: docs/CONTRACTS.md.
-import { leaderboardFixture } from "@/contracts/fixtures";
 import { handle, json } from "@/server/http";
-
-export const GET = handle(async () => json(leaderboardFixture));
+import { leaderboard } from "@/server/points";
+export const dynamic = "force-dynamic";
+export const GET = handle(async () => json(await leaderboard(), { headers: { "Cache-Control": "no-store" } }));
